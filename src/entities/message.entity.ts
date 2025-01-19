@@ -16,7 +16,11 @@ export class Message {
   createdAt: Date;
 
   @ManyToOne(() => User, (user) => user.messages)
-  user: User;
+  sender: User;
+
+  @ManyToOne(() => User, (user) => user.receivedMessages)
+  receiver: User;
+  
     
 
 }
