@@ -50,8 +50,11 @@ export class User {
   @OneToMany(() => Property, (property) => property.user)
   properties: Property[];
 
-  @OneToMany(() => Message, (message) => message.user)
+  @OneToMany(() => Message, (message) => message.sender)
   messages: Message[];
+
+  @OneToMany(() => Message, (message) => message.receiver)
+  receivedMessages: Message[];
 
   @ManyToMany(() => Property, (property) => property.likedBy)
   @JoinTable({ name: 'user_liked_properties' })

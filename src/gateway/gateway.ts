@@ -4,7 +4,7 @@ import { MessageBody, SubscribeMessage, WebSocketGateway, WebSocketServer, Conne
 import { Server } from "socket.io";
 import { Message } from "src/entities/message.entity";
 import { Repository } from "typeorm";
-import { AuthService } from 'src/auth/auth.service'; // Import your AuthService
+import { AuthService } from 'src/auth/auth.service';
 import { User } from "src/entities/user.entity";
 
 @WebSocketGateway({
@@ -16,22 +16,20 @@ export class MyGateway implements OnModuleInit {
     @WebSocketServer()
     server: Server;
 
-    // Store connected sockets by userId (converted to string)
     private userSockets: Map<string, Set<string>> = new Map();
 
     constructor(
         @InjectRepository(Message) private readonly messageRepository: Repository<Message>,
         @InjectRepository(User) private readonly userRepository: Repository<User>,
-        private readonly authService: AuthService, // Inject AuthService
+        private readonly authService: AuthService,
     ) {}
 
     onModuleInit() {
         this.server.on('connection', (socket) => {
-            const token = socket.handshake.headers.authorization?.split(' ')[1]; // Access token from headers
+            const token = socket.handshake.headers.authorization?.split(' ')[1];
             console.log('Token:', token);
 
             if (token) {
-                // Verify the token here
                 this.verifyToken(token, socket);
             } else {
                 console.log('No token provided');
@@ -42,18 +40,16 @@ export class MyGateway implements OnModuleInit {
 
     private async verifyToken(token: string, socket: any) {
         try {
-            const user = await this.authService.verifyToken(token); // Verify the token
-            socket.user = user; // Attach user to socket
+            const user = await this.authService.verifyToken(token);
+            socket.user = user;
             console.log('Authenticated User:', user);
 
-            // Convert userId to string
             const userId = user.id.toString();
             if (!this.userSockets.has(userId)) {
                 this.userSockets.set(userId, new Set());
             }
             this.userSockets.get(userId)?.add(socket.id);
 
-            // Handle socket disconnection
             socket.on('disconnect', () => {
                 this.userSockets.get(userId)?.delete(socket.id);
                 if (this.userSockets.get(userId)?.size === 0) {
@@ -67,46 +63,81 @@ export class MyGateway implements OnModuleInit {
     }
 
     @SubscribeMessage('newMessage')
-    async onNewMessage(@MessageBody() body: any, @ConnectedSocket() socket: any) {
-        const userId = socket.user?.id?.toString(); // Convert to string
-        if (!userId) {
-            console.log('User is not authenticated');
-            return;
-        }
+    async onNewMessage(@MessageBody() body: { receiverId: string; content: string }, @ConnectedSocket() socket: any) {
+    const senderId = socket.user?.id?.toString();
+    if (!senderId) {
+        console.log('User is not authenticated');
+        return;
+    }
 
-        const user = await this.userRepository.findOne({ where: { id: userId } });
-        if (!user) {
-            console.log('User not found');
-            return;
-        }
+    const sender = await this.userRepository.findOne({ where: { id: senderId } });
 
-        const newMessage = this.messageRepository.create({
-            msg: 'This is a message from the server',
-            content: body,
-            user,
+    // Convert receiverId from string to number
+    const receiverId = parseInt(body.receiverId, 10);
+    const receiver = await this.userRepository.findOne({ where: { id: receiverId } });
+
+    if (!sender || !receiver) {
+        console.log('Sender or receiver not found');
+        return;
+    }
+
+
+
+    const newMessage = this.messageRepository.create({
+        msg: 'This is a message from the server',
+        content: body.content,
+        sender: sender,
+        receiver: receiver,
+    });
+
+    await this.messageRepository.save(newMessage);
+
+    // Emit the new message to both sender and receiver
+    const senderSockets = this.userSockets.get(senderId);
+    const receiverSockets = this.userSockets.get(receiver.id.toString());
+
+    // Debugging logs
+    console.log('Sender Sockets:', senderSockets);
+    console.log('Receiver Sockets:', receiverSockets);
+
+    // Emit to sender
+    senderSockets?.forEach(socketId => {
+        this.server.to(socketId).emit('onMessage', {
+            msg: newMessage.msg,
+            content: body.content,
+            senderId: senderId,
+            receiverId: body.receiverId,
         });
+    });
 
-        await this.messageRepository.save(newMessage);
-
-        // Emit the new message to all sockets for the user
-        this.userSockets.get(userId)?.forEach(socketId => {
+    // Emit to receiver
+    if (receiverSockets) {
+        console.log('Sending message to receiver:', receiver.id.toString());
+        receiverSockets.forEach(socketId => {
+            console.log(`Sending message to receiver socket ID: ${socketId}`);
             this.server.to(socketId).emit('onMessage', {
-                msg: 'This is a message from the server',
-                content: body,
+                msg: newMessage.msg,
+                content: body.content,
+                senderId: senderId,
+                receiverId: body.receiverId,
             });
         });
+    } else {
+        console.log('No receiver sockets found for ID:', receiver.id.toString());
     }
+}
+
 
     @SubscribeMessage('getMessages')
     async onGetAllMessages(@ConnectedSocket() socket: any) {
-        const userId = socket.user?.id?.toString(); // Convert to string
+        const userId = socket.user?.id?.toString();
         if (!userId) {
             console.log('User is not authenticated');
             return;
         }
 
         const messages = await this.messageRepository.find({
-            where: { user: { id: userId } },
+            where: [{ sender: { id: userId } }, { receiver: { id: userId } }],
         });
 
         // Emit messages to the user
