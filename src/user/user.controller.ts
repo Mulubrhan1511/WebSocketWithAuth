@@ -37,6 +37,13 @@ export class UserController {
     return this.userService.findOne(req.user.id);
   }
 
+  @Public()
+  @Get()
+  findAll() {
+    console.log('findAll');
+    return this.userService.findAll();
+  }
+
   @Patch(':id')
   update(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
     return this.userService.update(+id, updateUserDto);

@@ -26,8 +26,11 @@ export class UserService {
     });
   }
 
-  findAll() {
-    return `This action returns all user`;
+  async findAll() {
+    const users = await this.UserRepo.find({
+      select: ['id', 'firstName', 'lastName'],
+    });
+    return users;
   }
 
   async findOne(id: number) {
